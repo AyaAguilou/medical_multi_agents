@@ -1,103 +1,36 @@
-"""Diagnostic agent - analyzes patient symptoms"""
-
-from app.nodes.diagnostic_agent import DiagnosticAgent
-
-logger = logging.getLogger(__name__)
-
-
-def diagnostic_node(state: WorkflowState) -> WorkflowState:
-    """
-    Diagnostic agent analyzes patient symptoms and generates diagnosis
-    """
-    logger.info(f"Diagnostic agent processing workflow {state.workflow_id}")
+def diagnostic_agent_node(state):
+    """Agent qui pose des questions et génère une synthèse SANS LLM"""
     
-    if not state.patient_data:
-        state.add_error("No patient data for diagnostic")
-        return state
+    # Récupérer l'index des questions
+    question_index = state.get("question_index", 0)
     
-    try:
-        symptoms = state.patient_data.symptoms
-        vitals = state.patient_data.vitals
+    # Liste des questions
+    questions = [
+        "Depuis combien de temps avez-vous ces symptômes ?",
+        "Avez-vous de la fièvre ? Si oui, quelle température ?",
+        "Avez-vous des difficultés à respirer ?",
+        "Avez-vous des douleurs ? Si oui, où et comment ?",
+        "Avez-vous d'autres symptômes à mentionner ?"
+    ]
+    
+    if question_index < 5:
+        # Poser la question
+        state["current_question"] = questions[question_index]
+        state["question_index"] = question_index + 1
+    else:
+        # Générer la synthèse à partir des réponses
+        answers = state.get("answers", [])
+        state["diagnosis"] = f"""
+        SYNTHÈSE CLINIQUE PRÉLIMINAIRE
         
-        # Simple rule-based diagnostic logic (can be replaced with LLM)
-        diagnosis = _analyze_symptoms(symptoms, vitals)
-        confidence = _calculate_confidence(symptoms, vitals)
+        {len(answers)} réponses reçues.
         
-        # Generate differential diagnoses
-        differential = _get_differential_diagnoses(symptoms)
+        Plaintes du patient:
+        {chr(10).join([f'- {a}' for a in answers])}
         
-        # Recommend tests
-        recommended_tests = _recommend_tests(symptoms, diagnosis)
-        
-        state.diagnostic_result = DiagnosticResult(
-            diagnosis=diagnosis,
-            confidence=confidence,
-            reasoning=f"Analysis of {len(symptoms)} symptoms with vitals {vitals}",
-            differential_diagnoses=differential,
-            recommended_tests=recommended_tests
-        )
-        
-        logger.info(f"Diagnostic completed: {diagnosis} (confidence: {confidence})")
-        state.metadata["diagnostic_timestamp"] = datetime.now().isoformat()
-        
-    except Exception as e:
-        logger.error(f"Diagnostic error: {str(e)}")
-        state.add_error(f"Diagnostic failed: {str(e)}")
+        Recommandation: Repos et hydratation. 
+        Consulter un médecin en cas d'aggravation.
+        """
+        state["all_questions_asked"] = True
     
     return state
-
-
-def _analyze_symptoms(symptoms: list, vitals: dict) -> str:
-    """Simple symptom analysis"""
-    symptom_score = {}
-    
-    # Map symptoms to conditions (simplified)
-    if "fever" in symptoms or "cough" in symptoms:
-        symptom_score["respiratory_infection"] = symptom_score.get("respiratory_infection", 0) + 1
-    if "fever" in symptoms:
-        symptom_score["infection"] = symptom_score.get("infection", 0) + 1
-    if "headache" in symptoms or "fatigue" in symptoms:
-        symptom_score["general_illness"] = symptom_score.get("general_illness", 0) + 1
-    
-    # Return top diagnosis
-    if symptom_score:
-        return max(symptom_score, key=symptom_score.get)
-    return "Unknown"
-
-
-def _calculate_confidence(symptoms: list, vitals: dict) -> float:
-    """Calculate diagnostic confidence"""
-    confidence = 0.5  # Base confidence
-    
-    # Increase confidence with more symptoms
-    confidence += min(len(symptoms) * 0.1, 0.3)
-    
-    # Increase confidence if vitals provided
-    if vitals:
-        confidence += 0.1
-    
-    return min(confidence, 0.95)
-
-
-def _get_differential_diagnoses(symptoms: list) -> list:
-    """Generate differential diagnoses"""
-    differentials = []
-    
-    if "fever" in symptoms or "cough" in symptoms:
-        differentials.extend(["Common Cold", "Influenza", "Bronchitis"])
-    if "headache" in symptoms:
-        differentials.append("Migraine")
-    
-    return differentials[:3]  # Return top 3
-
-
-def _recommend_tests(symptoms: list, diagnosis: str) -> list:
-    """Recommend diagnostic tests"""
-    tests = []
-    
-    if "respiratory" in diagnosis.lower():
-        tests.extend(["Chest X-ray", "CBC", "Viral Panel"])
-    elif "infection" in diagnosis.lower():
-        tests.extend(["Blood Culture", "CBC", "Inflammatory Markers"])
-    
-    return tests

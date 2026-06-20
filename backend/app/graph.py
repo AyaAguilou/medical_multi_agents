@@ -1,125 +1,58 @@
-"""Workflow graph - orchestrates the medical multi-agent workflow"""
+from langgraph.graph import StateGraph, END
 
-import uuid
-import logging
-from datetime import datetime
-from .state import WorkflowState, WorkflowPhase, PatientData
-from .nodes.supervisor import supervisor_node
-from .nodes.diagnostic_agent import diagnostic_node
-from .nodes.physician_review import physician_review_node
-from .nodes.report_agent import report_node
-
-logger = logging.getLogger(__name__)
-
-# Store active workflows
-_active_workflows = {}
-
-
-def create_workflow() -> str:
-    """Create a new workflow instance"""
-    workflow_id = str(uuid.uuid4())
-    state = WorkflowState(workflow_id=workflow_id)
-    _active_workflows[workflow_id] = state
-    logger.info(f"Created workflow {workflow_id}")
-    return workflow_id
-
-
-def start_workflow(workflow_id: str, patient_id: str, symptoms: list, vitals: dict = None) -> dict:
-    """
-    Start a new medical workflow
+def ask_questions(state):
+    idx = state.get("question_index", 0)
     
-    Args:
-        workflow_id: Unique workflow identifier
-        patient_id: Patient identifier
-        symptoms: List of patient symptoms
-        vitals: Patient vital signs
-    
-    Returns:
-        Workflow state as dictionary
-    """
-    if workflow_id not in _active_workflows:
-        raise ValueError(f"Workflow {workflow_id} not found")
-    
-    state = _active_workflows[workflow_id]
-    
-    # Initialize patient data
-    state.patient_data = PatientData(
-        patient_id=patient_id,
-        symptoms=symptoms,
-        vitals=vitals or {}
-    )
-    state.phase = WorkflowPhase.INITIAL
-    state.metadata["started_at"] = datetime.now().isoformat()
-    
-    logger.info(f"Started workflow {workflow_id} for patient {patient_id}")
-    
-    # Execute workflow
-    return execute_workflow(workflow_id)
-
-
-def execute_workflow(workflow_id: str) -> dict:
-    """
-    Execute a complete workflow cycle
-    
-    Args:
-        workflow_id: Workflow identifier
-    
-    Returns:
-        Updated workflow state
-    """
-    if workflow_id not in _active_workflows:
-        raise ValueError(f"Workflow {workflow_id} not found")
-    
-    state = _active_workflows[workflow_id]
-    max_iterations = 10
-    iteration = 0
-    
-    while state.phase not in [WorkflowPhase.COMPLETED, WorkflowPhase.FAILED] and iteration < max_iterations:
-        iteration += 1
-        logger.info(f"Workflow {workflow_id} - Iteration {iteration}, Phase: {state.phase.value}")
-        
-        # Route based on current phase
-        if state.phase == WorkflowPhase.INITIAL:
-            state = supervisor_node(state)
-        elif state.phase == WorkflowPhase.DIAGNOSTIC:
-            state = diagnostic_node(state)
-            state = supervisor_node(state)
-        elif state.phase == WorkflowPhase.REVIEW:
-            state = physician_review_node(state)
-            state = supervisor_node(state)
-        elif state.phase == WorkflowPhase.REPORT:
-            state = report_node(state)
-            state = supervisor_node(state)
-        else:
-            break
-    
-    if iteration >= max_iterations:
-        logger.warning(f"Workflow {workflow_id} reached max iterations")
-        state.add_error("Workflow exceeded maximum iterations")
-    
-    state.metadata["completed_at"] = datetime.now().isoformat()
-    state.metadata["iterations"] = iteration
-    
-    _active_workflows[workflow_id] = state
-    return state.to_dict()
-
-
-def get_workflow_status(workflow_id: str) -> dict:
-    """Get current workflow status"""
-    if workflow_id not in _active_workflows:
-        raise ValueError(f"Workflow {workflow_id} not found")
-    
-    state = _active_workflows[workflow_id]
-    return state.to_dict()
-
-
-def list_workflows() -> list:
-    """List all active workflows"""
-    return [
-        {
-            "workflow_id": wf_id,
-            "phase": state.phase.value,
-            "patient_id": state.patient_data.patient_id if state.patient_data else None
-        }
-        for wf_id, state in _active_workflows.items()
+    questions = [
+        "Depuis combien de temps avez-vous ces symptômes ?",
+        "Avez-vous de la fièvre ? Si oui, quelle température ?",
+        "Avez-vous des difficultés à respirer ?",
+        "Avez-vous des douleurs ? Si oui, où et comment ?",
+        "Avez-vous d'autres symptômes à mentionner ?"
     ]
+    
+    if idx < 5:
+        state["current_question"] = questions[idx]
+        state["question_index"] = idx + 1
+    else:
+        answers = state.get("answers", [])
+        state["diagnosis"] = f"Synthèse basée sur {len(answers)} réponses."
+        state["all_questions_asked"] = True
+    
+    return state
+
+def doctor_review(state):
+    if state.get("doctor_approved"):
+        state["report"] = f"""
+RAPPORT FINAL
+Diagnostic: {state.get('diagnosis', 'Non disponible')}
+Avis du médecin: {state.get('doctor_comment', 'Non fourni')}
+Ce système ne remplace pas une consultation médicale.
+"""
+        state["next_step"] = "END"
+    else:
+        state["pending_doctor"] = True
+    return state
+
+def router(state):
+    if state.get("all_questions_asked"):
+        return "doctor"
+    if state.get("next_step") == "END":
+        return END
+    return "ask_questions"
+
+graph = StateGraph(dict)
+graph.add_node("ask_questions", ask_questions)
+graph.add_node("doctor", doctor_review)
+
+graph.set_entry_point("ask_questions")
+graph.add_conditional_edges("ask_questions", router, {
+    "ask_questions": "ask_questions",
+    "doctor": "doctor",
+    END: END
+})
+graph.add_conditional_edges("doctor", router, {
+    END: END
+})
+
+app = graph.compile()

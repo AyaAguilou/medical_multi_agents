@@ -1,5 +1,10 @@
 fastapi
 uvicorn
+streamlit
+requests
+langgraph
+langchain
+pydantic
+python-dotenv
 httpx
-pytest
 

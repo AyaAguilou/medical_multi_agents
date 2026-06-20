@@ -1,30 +1,44 @@
-from app.nodes.diagnostic_agent import DiagnosticAgent
-from app.nodes.physician_review import physician_review
-from app.nodes.report_agent import report_agent
+"""Workflow execution example for Medical Multi-Agents backend."""
 
-# Etat initial
-state = {
+import sys
+from pathlib import Path
+from typing import Any, Dict
 
-    "patient_problem": "J'ai de la fièvre et une toux"
-}
+# Make sure the backend package is importable when running this file directly
+sys.path.insert(0, str(Path(__file__).parent))
 
-# Diagnostic
-state = diagnostic_agent(state)
+from app.graph import create_workflow, start_workflow, get_workflow_status
 
-print("=== QUESTIONS ===")
-print(state["questions"])
 
-print("\n=== RECOMMANDATION ===")
-print(state["interim_care"])
+def print_workflow_state(state: Dict[str, Any]) -> None:
+    """Print a workflow state summary."""
+    print("\n=== WORKFLOW STATE ===")
+    print(f"Workflow ID: {state.get('workflow_id')}")
+    print(f"Phase: {state.get('phase')}")
+    print(f"Errors: {state.get('errors')}")
+    print(f"Patient ID: {state.get('patient_data', {}).get('patient_id') if state.get('patient_data') else None}")
+    print(f"Diagnostic: {state.get('diagnostic_result', {}).get('diagnosis') if state.get('diagnostic_result') else None}")
+    print(f"Review approved: {state.get('review_result', {}).get('approved') if state.get('review_result') else None}")
+    print(f"Final report status: {state.get('final_report', {}).get('status') if state.get('final_report') else None}")
 
-print("\n=== SYNTHÈSE ===")
-print(state["diagnostic_summary"])
 
-# Human in the loop
-state = physician_review(state)
+def run_example_workflow() -> None:
+    """Create and execute a workflow from start to finish."""
+    workflow_id = create_workflow()
+    print(f"Created workflow: {workflow_id}")
 
-# Rapport final
-state = report_agent(state)
+    workflow_state = start_workflow(
+        workflow_id=workflow_id,
+        patient_id="P001",
+        symptoms=["fever", "cough", "fatigue"],
+        vitals={"temperature": 38.5, "heart_rate": 95}
+    )
 
-print("\n=== RAPPORT FINAL ===")
-print(state["final_report"])
+    print_workflow_state(workflow_state)
+
+    final_state = get_workflow_status(workflow_id)
+    print_workflow_state(final_state)
+
+
+if __name__ == "__main__":
+    run_example_workflow()

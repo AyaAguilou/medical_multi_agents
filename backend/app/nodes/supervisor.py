@@ -1,54 +1,23 @@
-"""Supervisor agent - orchestrates workflow"""
+from typing import Literal
 
-import logging
-from datetime import datetime
-from ..state import WorkflowState, WorkflowPhase
-
-logger = logging.getLogger(__name__)
-
-
-def supervisor_node(state: WorkflowState) -> WorkflowState:
-    """
-    Supervisor agent routes workflow to appropriate agents
-    """
-    logger.info(f"Supervisor processing workflow {state.workflow_id}")
+def supervisor_node(state: dict) -> dict:
+    """Nœud superviseur qui décide de l'étape suivante"""
     
-    if state.phase == WorkflowPhase.INITIAL:
-        # Validate patient data exists
-        if not state.patient_data:
-            state.add_error("No patient data provided")
-            return state
-        
-        logger.info(f"Routing patient {state.patient_data.patient_id} to diagnostic agent")
-        state.phase = WorkflowPhase.DIAGNOSTIC
-        state.metadata["supervisor_timestamp"] = datetime.now().isoformat()
-        
-    elif state.phase == WorkflowPhase.DIAGNOSTIC:
-        # Check if diagnostic completed
-        if state.diagnostic_result:
-            logger.info("Diagnostic completed, routing to physician review")
-            state.phase = WorkflowPhase.REVIEW
-        else:
-            logger.warning("Diagnostic not completed yet")
+    # Si le rapport final est généré, on termine
+    if state.get("final_report"):
+        return {"next": "FINISH"}
     
-    elif state.phase == WorkflowPhase.REVIEW:
-        # Check if review completed
-        if state.review_result:
-            if state.review_result.approved:
-                logger.info("Diagnosis approved, routing to report generation")
-                state.phase = WorkflowPhase.REPORT
-            else:
-                logger.warning("Diagnosis rejected, routing back to diagnostic")
-                state.phase = WorkflowPhase.DIAGNOSTIC
-        else:
-            logger.warning("Review not completed yet")
+    # Si le médecin a déjà donné son traitement, on va au rapport
+    if state.get("physician_treatment"):
+        return {"next": "report_agent"}
     
-    elif state.phase == WorkflowPhase.REPORT:
-        # Check if report generated
-        if state.final_report:
-            logger.info("Report completed, workflow finished")
-            state.phase = WorkflowPhase.COMPLETED
-        else:
-            logger.warning("Report not generated yet")
+    # Si la synthèse diagnostique est faite, on va vers le médecin
+    if state.get("diagnostic_summary"):
+        return {"next": "physician_review"}
     
-    return state
+    # Si les 5 questions sont posées, on génère la synthèse
+    if state.get("question_count", 0) >= 5:
+        return {"next": "diagnostic_agent"}  # Pour générer la synthèse
+    
+    # Sinon, on continue le diagnostic
+    return {"next": "diagnostic_agent"}

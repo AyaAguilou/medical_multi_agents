@@ -1,66 +1,28 @@
-"""Physician review agent - validates diagnosis"""
-
-import logging
-from datetime import datetime
-from ..state import WorkflowState, ReviewResult
-
-logger = logging.getLogger(__name__)
-
-
-def physician_review_node(state: WorkflowState) -> WorkflowState:
-    """
-    Physician review agent validates diagnosis and provides feedback
-    """
-    logger.info(f"Physician review processing workflow {state.workflow_id}")
+def physician_review_node(state: dict) -> dict:
+    """Nœud d'intervention du médecin (Human-in-the-Loop)"""
     
-    if not state.diagnostic_result:
-        state.add_error("No diagnostic result to review")
-        return state
+    # Afficher la synthèse au médecin
+    summary = state.get("diagnostic_summary", "Synthèse non disponible")
+    interim_care = state.get("interim_care", "Recommandation non disponible")
     
-    try:
-        # Simulate physician review
-        diagnosis = state.diagnostic_result.diagnosis
-        confidence = state.diagnostic_result.confidence
-        
-        # Approval logic
-        approved = confidence >= 0.7
-        notes = _generate_review_notes(state)
-        
-        state.review_result = ReviewResult(
-            approved=approved,
-            reviewer_notes=notes,
-            confidence=confidence,
-            modifications=None if approved else "Recommend additional testing"
-        )
-        
-        logger.info(f"Physician review: {'APPROVED' if approved else 'REJECTED'}")
-        state.metadata["review_timestamp"] = datetime.now().isoformat()
-        state.metadata["reviewer"] = "Dr. System"
-        
-    except Exception as e:
-        logger.error(f"Physician review error: {str(e)}")
-        state.add_error(f"Review failed: {str(e)}")
+    # Message pour le médecin
+    review_message = f"""
+    REVUE MÉDICALE REQUISE
+    
+    Synthèse clinique: {summary}
+    Recommandation intermédiaire: {interim_care}
+    
+    Veuillez entrer votre traitement ou conduite à tenir:
+    """
+    
+    state["messages"].append({"role": "system", "content": review_message})
+    
+    # Le médecin doit fournir un traitement
+    if not state.get("physician_treatment"):
+        # En attente de l'input du médecin
+        state["next"] = "physician_review"
+    else:
+        # Traitement reçu, continuer
+        state["next"] = "supervisor"
     
     return state
-
-
-def _generate_review_notes(state: WorkflowState) -> str:
-    """Generate physician review notes"""
-    diagnostic = state.diagnostic_result
-    
-    notes = f"""
-    Diagnosis: {diagnostic.diagnosis}
-    Confidence: {diagnostic.confidence:.1%}
-    Reasoning: {diagnostic.reasoning}
-    
-    Differential Diagnoses:
-    - {chr(10).join([f'  {d}' for d in diagnostic.differential_diagnoses])}
-    
-    Recommended Tests:
-    - {chr(10).join([f'  {t}' for t in diagnostic.recommended_tests])}
-    
-    Patient: {state.patient_data.patient_id}
-    Symptoms: {', '.join(state.patient_data.symptoms)}
-    """.strip()
-    
-    return notes
